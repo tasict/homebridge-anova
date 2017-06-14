@@ -16,10 +16,20 @@ module.exports = function(homebridge){
   homebridge.registerAccessory("homebridge-anova", "AnovaCooker", AnovaCooker);
 };
 
-function sendCommand(command, body){
+function sendCommand(url, body){
 
+	const response = await fetch(
+	  url,
+	  (
+	    body ? [{
+	      method: 'POST',
+	      headers: { 'Content-Type': 'application/json' },
+	      body: JSON.stringify(body),
+	    }] : []
+	  ),
+	);
 
-
+	return response.json();
 };
 
 function AnovaCooker(log, config) {
@@ -58,143 +68,53 @@ AnovaCooker.prototype = {
 		this.log("Identify requested!");
 		callback(null);
 	},
+	getStatus: function(){
+
+		var response = sendCommand(COOKER_ENDPOINT(this.cooker, this.secret));
+
+		this.log("response", response);
+
+		return response;
+	},
 	// Required
 	getCurrentHeatingCoolingState: function(callback) {
-		var rest = COOKER_ENDPOINT(this.cooker, this.secret);
-		this.log("getCurrentHeatingCoolingState from:", rest);
-		request.get({
-			url: rest
-		}, function(err, response, body) {
 
-			if (!err && response.statusCode == 200) {
-				this.log("response success");
-				var json = JSON.parse(body); //{targetHeatingCoolingState":3,"currentHeatingCoolingState":0,"targetTemperature":10,"temperature":12,"humidity":98}
-				this.log("currentHeatingCoolingState is %s", json.currentHeatingCoolingState);
-				this.currentHeatingCoolingState = json.currentHeatingCoolingState;
-				this.service.setCharacteristic(Characteristic.CurrentHeatingCoolingState, this.currentHeatingCoolingState);
+		var response = this.getStatus();
+
+		if (!err && response.status == 200) {
+			this.currentHeatingCoolingState = response.is_running ? Characteristic.CurrentHeatingCoolingState.HEAT : Characteristic.CurrentHeatingCoolingState.COOL;
+			this.service.setCharacteristic(Characteristic.CurrentHeatingCoolingState, this.currentHeatingCoolingState);
 				
-				callback(null, this.currentHeatingCoolingState); // success
-			} else {
-				this.log("Error getting CurrentHeatingCoolingState: %s", err);
-				callback(err);
-			}
-		}.bind(this));
+			callback(null, this.currentHeatingCoolingState); // success
+		} else {
+			
+			this.service.setCharacteristic(Characteristic.CurrentHeatingCoolingState, Characteristic.CurrentHeatingCoolingState.OFF);
+			callback(null, this.currentHeatingCoolingState); // success
+		}
 	},
 	getTargetHeatingCoolingState: function(callback) {
-		var rest = COOKER_ENDPOINT(this.cooker, this.secret);
-		this.log("getTargetHeatingCoolingState from:", rest);
-		request.get({
-			url: rest
-		}, function(err, response, body) {
-			if (!err && response.statusCode == 200) {
-				this.log("response success");
-				var json = JSON.parse(body); //{"targetHeatingCoolingState":3,"currentHeatingCoolingState":0,"targetTemperature":10,"temperature":12,"humidity":98}
-				this.log("TargetHeatingCoolingState received is %s", json.targetHeatingCoolingState, json.targetStateCode);
-				this.targetHeatingCoolingState = json.targetHeatingCoolingState !== undefined? json.targetHeatingCoolingState : json.targetStateCode;
-				this.log("TargetHeatingCoolingState is now %s", this.targetHeatingCoolingState);
-				//this.service.setCharacteristic(Characteristic.TargetHeatingCoolingState, this.targetHeatingCoolingState);
-				
-				callback(null, this.targetHeatingCoolingState); // success
-			} else {
-				this.log("Error getting TargetHeatingCoolingState: %s", err);
-				callback(err);
-			}
-		}.bind(this));
+
+		callback(null, this.targetHeatingCoolingState); // success
 	},
 	setTargetHeatingCoolingState: function(value, callback) {
 
-		var rest = COOKER_ENDPOINT(this.cooker, this.secret);
-
-		if(value === undefined) {
-			callback(); //Some stuff call this without value doing shit with the rest
-		} else {
-			this.log("setTargetHeatingCoolingState from/to:", rest + value);
-			
-			request.get({
-				url: rest
-			}, function(err, response, body) {
-				if (!err && response.statusCode == 200) {
-					this.log("response success");
-					this.targetHeatingCoolingState = value;
-					callback(null); // success
-				} else {
-					this.log("Error getting state: %s", err);
-					callback(err);
-				}
-			}.bind(this));
-		}
+		callback(null); // success
 	},
 	getCurrentTemperature: function(callback) {
-		var rest = COOKER_ENDPOINT(this.cooker, this.secret);
-		this.log("getCurrentTemperature from:", rest);
-		request.get({
-			url: rest
-		}, function(err, response, body) {
-			if (!err && response.statusCode == 200) {
-				this.log("response success");
-				var json = JSON.parse(body); //{targetHeatingCoolingState":3,"currentHeatingCoolingState":0,"temperature":"18.10","humidity":"34.10"}
-
-				if (json.currentTemperature != undefined)
-                                {
-                                  this.log("CurrentTemperature %s", json.currentTemperature);
-                                  this.currentTemperature = parseFloat(json.currentTemperature);
-                                }
-                                else
-                                {
-                                  this.log("Temperature %s", json.temperature);
-                                  this.currentTemperature = parseFloat(json.temperature);
-                                }
-								
-				callback(null, this.currentTemperature); // success
-			} else {
-				this.log("Error getting state: %s", err);
-				callback(err);
-			}
-		}.bind(this));
+		
+		callback(null, this.currentTemperature); // success
 	},
 	getTargetTemperature: function(callback) {
-		var rest = COOKER_ENDPOINT(this.cooker, this.secret);
-		this.log("getTargetTemperature from:", rest);
-		request.get({
-			url: rest
-		}, function(err, response, body) {
-			if (!err && response.statusCode == 200) {
-				this.log("response success");
-				var json = JSON.parse(body); //{targetHeatingCoolingState":3,"currentHeatingCoolingState":0"temperature":"18.10","humidity":"34.10"}
-				this.targetTemperature = parseFloat(json.targetTemperature);
-				this.log("Target temperature is %s", this.targetTemperature);
-				callback(null, this.targetTemperature); // success
-			} else {
-				this.log("Error getting state: %s", err);
-				callback(err);
-			}
-		}.bind(this));
+		callback(null, this.targetTemperature); // success
 	},
 	setTargetTemperature: function(value, callback) {
-		var rest = COOKER_ENDPOINT(this.cooker, this.secret);
-		this.log("setTargetTemperature from:", rest+value);
-		request.get({
-			url: rest
-		}, function(err, response, body) {
-			if (!err && response.statusCode == 200) {
-				this.log("response success");
-				callback(null); // success
-			} else {
-				this.log("Error getting state: %s", err);
-				callback(err);
-			}
-		}.bind(this));
+		callback(null); // success
 	},
 	getTemperatureDisplayUnits: function(callback) {
-		this.log("getTemperatureDisplayUnits:", this.temperatureDisplayUnits);
-		var error = null;
 		callback(error, this.temperatureDisplayUnits);
 	},
 	setTemperatureDisplayUnits: function(value, callback) {
-		this.log("setTemperatureDisplayUnits from %s to %s", this.temperatureDisplayUnits, value);
-		this.temperatureDisplayUnits = value;
-		var error = null;
-		callback(error);
+		callback(null); // success
 	},
 	getName: function(callback) {
 		this.log("getName :", this.name);
