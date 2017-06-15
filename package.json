@@ -13,12 +13,12 @@
   "author": "tasict",
   "repository": {
     "type": "git",
-    "url": "git+https://tasict@gitlab.ctsite.tk/linux/homebridge-anova.git"
+    "url": "git+git@github.com:tasict/homebridge-http-anova.git"
   },
   "dependencies": {
     "request": "^2.65.0"
   },
-  "homepage": "https://gitlab.ctsite.tk/linux/homebridge-anova.git#readme",
+  "homepage": "https://github.com/tasict/homebridge-anova#readme",
   "main": "index.js",
   "devDependencies": {},
   "scripts": {
