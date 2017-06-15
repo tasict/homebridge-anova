@@ -1,35 +1,19 @@
 var Service, Characteristic;
 var request = require("request");
 
+
 const COOKER_ENDPOINT = (id, secretKey) => (
   `https://api.anovaculinary.com/cookers/${encodeURIComponent(id)}?secret=${secretKey}&requestKey=${new Date().valueOf()}`
 );
 
 const JOBS_ENDPOINT = (id, secretKey) => (
   `https://api.anovaculinary.com/cookers/${encodeURIComponent(id)}/jobs?secret=${secretKey}&requestKey=${new Date().valueOf()}`
-); 
-
+);
 
 module.exports = function(homebridge){
   Service = homebridge.hap.Service;
   Characteristic = homebridge.hap.Characteristic;
   homebridge.registerAccessory("homebridge-anova", "AnovaCooker", AnovaCooker);
-};
-
-function sendCommand(url, body){
-
-	const response = await fetch(
-	  url,
-	  (
-	    body ? [{
-	      method: 'POST',
-	      headers: { 'Content-Type': 'application/json' },
-	      body: JSON.stringify(body),
-	    }] : []
-	  ),
-	);
-
-	return response.json();
 };
 
 function AnovaCooker(log, config) {
@@ -38,8 +22,8 @@ function AnovaCooker(log, config) {
 	//Characteristic.TemperatureDisplayUnits.CELSIUS = 0;
 	//Characteristic.TemperatureDisplayUnits.FAHRENHEIT = 1;
 	this.temperatureDisplayUnits = Characteristic.TemperatureDisplayUnits.CELSIUS;
-	this.maxTemp = this.TemperatureDisplayUnits == 0 ? 99 : 210;
-	this.minTemp = this.TemperatureDisplayUnits == 0 ? 25 : 77;
+	this.maxTemp = this.temperatureDisplayUnits == Characteristic.TemperatureDisplayUnits.CELSIUS ? 99 : 210;
+	this.minTemp = this.temperatureDisplayUnits == Characteristic.TemperatureDisplayUnits.CELSIUS ? 25 : 77;
 	this.name = config.name;
 	this.cooker = config.cooker || null;
 	this.secret = config.secret || null;
@@ -68,61 +52,157 @@ AnovaCooker.prototype = {
 		this.log("Identify requested!");
 		callback(null);
 	},
-	getStatus: function(){
-
-		var response = sendCommand(COOKER_ENDPOINT(this.cooker, this.secret));
-
-		this.log("response", response);
-
-		return response;
-	},
-	// Required
-	getCurrentHeatingCoolingState: function(callback) {
-
-		var response = this.getStatus();
-
-		if (!err && response.status == 200) {
-			this.currentHeatingCoolingState = response.is_running ? Characteristic.CurrentHeatingCoolingState.HEAT : Characteristic.CurrentHeatingCoolingState.COOL;
-			this.service.setCharacteristic(Characteristic.CurrentHeatingCoolingState, this.currentHeatingCoolingState);
-				
-			callback(null, this.currentHeatingCoolingState); // success
-		} else {
-			
-			this.service.setCharacteristic(Characteristic.CurrentHeatingCoolingState, Characteristic.CurrentHeatingCoolingState.OFF);
-			callback(null, this.currentHeatingCoolingState); // success
-		}
-	},
-	getTargetHeatingCoolingState: function(callback) {
-
-		callback(null, this.targetHeatingCoolingState); // success
-	},
-	setTargetHeatingCoolingState: function(value, callback) {
-
-		callback(null); // success
-	},
-	getCurrentTemperature: function(callback) {
-		
-		callback(null, this.currentTemperature); // success
-	},
-	getTargetTemperature: function(callback) {
-		callback(null, this.targetTemperature); // success
-	},
-	setTargetTemperature: function(value, callback) {
-		callback(null); // success
-	},
-	getTemperatureDisplayUnits: function(callback) {
-		callback(error, this.temperatureDisplayUnits);
-	},
-	setTemperatureDisplayUnits: function(value, callback) {
-		callback(null); // success
-	},
 	getName: function(callback) {
 		this.log("getName :", this.name);
 		var error = null;
 		callback(error, this.name);
 	},
-
 	getServices: function() {
+
+		function getCurrentHeatingCoolingState(json) {
+
+			return json.is_running ? Characteristic.TargetHeatingCoolingState.HEAT : Characteristic.CurrentHeatingCoolingState.COOL;
+
+		}
+
+		function getTargetHeatingCoolingState(json) {
+
+			return json.is_running ? Characteristic.TargetHeatingCoolingState.HEAT : Characteristic.CurrentHeatingCoolingState.COOL;
+		}
+
+
+		function getCurrentTemperature(json) {
+			
+			return json.current_temp ? json.current_temp :  this.minTemp;
+		}
+
+		function getTargetTemperature(json) {
+			return json.target_temp ? json.target_temp :  this.minTemp;
+		}
+
+		
+		function getTemperatureDisplayUnits(json) {
+
+			var unit = json.temp_unit == 'c' ? Characteristic.TemperatureDisplayUnits.CELSIUS : Characteristic.TemperatureDisplayUnits.FAHRENHEIT;
+
+			this.temperatureDisplayUnits = unit;
+			this.maxTemp = this.temperatureDisplayUnits == Characteristic.TemperatureDisplayUnits.CELSIUS ? 99 : 210;
+			this.minTemp = this.temperatureDisplayUnits == Characteristic.TemperatureDisplayUnits.CELSIUS ? 25 : 77;
+
+			var characteristicCurrentTemperature = this.service.getCharacteristic(Characteristic.CurrentTemperature);
+
+			if(characteristicCurrentTemperature){
+				characteristicCurrentTemperature.setProps({
+				    maxValue: this.maxTemp,
+				    minValue: this.minTemp
+				});
+			}
+
+			var characteristicTargetTemperature = this.service.getCharacteristic(Characteristic.TargetTemperature);
+
+			if(characteristicTargetTemperature){
+				characteristicTargetTemperature.setProps({
+				    maxValue: this.maxTemp,
+				    minValue: this.minTemp
+				});
+			}
+
+
+			return unit;
+		}
+
+		function setTargetHeatingCoolingState(value) {
+
+			if(value == Characteristic.TargetHeatingCoolingState.COOL || value == Characteristic.TargetHeatingCoolingState.OFF ){
+				return "{ is_running: false }";
+			}
+
+			return "{ is_running: true }";
+		}
+
+		function setTargetTemperature(value) {
+			return "{ target_temp: ${value} }";
+		}
+
+		function setTemperatureDisplayUnits(value) {
+			return value == Characteristic.TemperatureDisplayUnits.CELSIUS ? "{ temp_unit: 'c' }" : "{ temp_unit: 'f' }";
+		}
+		
+		var getDispatch = function (callback, characteristic){
+			var value = 0;
+			var actionName = "get" + characteristic.displayName.replace(/\s/g, '');
+			
+			request.get({ url: COOKER_ENDPOINT(this.cooker, this.secret)}, function (err, response, body) {
+
+				
+				if (!err && response.statusCode == 200) {
+					this.log("getDispatch:returnedvalue: ", JSON.parse(body).value);
+					
+					var json = JSON.parse(body);
+
+					switch (actionName) {
+						case "getCurrentHeatingCoolingState": value = getCurrentHeatingCoolingState(json); break;
+						case "getTargetHeatingCoolingState": value = getTargetHeatingCoolingState(json); break;
+						case "getCurrentTemperature": value = getCurrentTemperature(json); break;
+						case "getTargetTemperature": value = getTargetTemperature(json); break;
+						case "getTemperatureDisplayUnits": value = getTemperatureDisplayUnits(json); break;
+						default: value = 0;
+					}
+				}
+				else
+				{
+					switch (actionName) {
+						case "getCurrentHeatingCoolingState": value = Characteristic.CurrentHeatingCoolingState.OFF; break;
+						case "getTargetHeatingCoolingState": value = Characteristic.TargetHeatingCoolingState.OFF; break;
+						case "getCurrentTemperature": value = this.minTemp; break;
+						case "getTargetTemperature": value = this.minTemp; break;
+						case "getTemperatureDisplayUnits": value = this.temperatureDisplayUnits; break;
+						default: value = 0;
+					}
+				}
+
+				this.log("getDispatch: " + actionName + ":", value);
+
+				callback(null, value);
+
+			}.bind(this));
+
+		}.bind(this);
+
+		var setDispatch = function (value, callback, characteristic) {
+
+			var actionName = "set" + characteristic.displayName.replace(/\s/g, '');
+			this.log("setDispatch: " + actionName + ":", value);
+
+			var body = [];
+
+			switch (actionName) {
+				case "setTargetHeatingCoolingState": body = setTargetHeatingCoolingState(value); break;
+				case "setTargetTemperature": body = setTargetTemperature(value); break;
+				case "setTemperatureDisplayUnits": body = setTemperatureDisplayUnits(value); break;
+				default:
+			}
+			
+			request.post({ 
+				url: COOKER_ENDPOINT(this.cooker, this.secret), 
+				headers: { 'Content-Type': 'application/json' },
+	        	body: JSON.stringify(body)
+	        }, function (err, response, body) {
+				
+				callback(null, value);
+
+			}.bind(this));
+
+		}.bind(this);
+
+		function makeHelper(characteristic) {
+
+			return {
+				getter: function (callback) { getDispatch(callback, characteristic); },
+				setter: function (value, callback) { setDispatch(value, callback, characteristic) }
+			};
+		}
+
 
 		// you can OPTIONALLY create an information service if you wish to override
 		// the default values for things like serial number, model, etc.
@@ -133,48 +213,28 @@ AnovaCooker.prototype = {
 			.setCharacteristic(Characteristic.Model, "Anova Precision Cooker")
 			.setCharacteristic(Characteristic.SerialNumber, this.cooker);
 
-		
-		// Required Characteristics
-		this.service
-			.getCharacteristic(Characteristic.CurrentHeatingCoolingState)
-			.on('get', this.getCurrentHeatingCoolingState.bind(this));
 
-		this.service
-			.getCharacteristic(Characteristic.TargetHeatingCoolingState)
-			.on('get', this.getTargetHeatingCoolingState.bind(this))
-			.on('set', this.setTargetHeatingCoolingState.bind(this));
+		var counters = [];
 
-		this.service
-			.getCharacteristic(Characteristic.CurrentTemperature)
-			.on('get', this.getCurrentTemperature.bind(this));
+		//this.service.addCharacteristic(Characteristic.LockManagementAutoSecurityTimeout);
 
-		this.service
-			.getCharacteristic(Characteristic.TargetTemperature)
-			.on('get', this.getTargetTemperature.bind(this))
-			.on('set', this.setTargetTemperature.bind(this));
+		// Bind Characteristics
+		for (var characteristicIndex in this.service.characteristics) 
+		{
+			var characteristic = this.service.characteristics[characteristicIndex];
+			var compactName = characteristic.displayName.replace(/\s/g, '');
 
-		this.service
-			.getCharacteristic(Characteristic.TemperatureDisplayUnits)
-			.on('get', this.getTemperatureDisplayUnits.bind(this))
-			.on('set', this.setTemperatureDisplayUnits.bind(this));
+			if(compactName == 'Name'){
+				continue;
+			}
 
-		this.service
-			.getCharacteristic(Characteristic.Name)
-			.on('get', this.getName.bind(this));
+			this.log("makeHelper: ", compactName);
 
-		this.service.getCharacteristic(Characteristic.CurrentTemperature)
-			.setProps({
-				minValue: this.minTemp,
-				maxValue: this.maxTemp,
-				minStep: 1
-			});
+			counters[characteristicIndex] = makeHelper(characteristic);
+			characteristic.on('get', counters[characteristicIndex].getter.bind(this))
+			characteristic.on('set', counters[characteristicIndex].setter.bind(this));
+		}
 
-		this.service.getCharacteristic(Characteristic.TargetTemperature)
-			.setProps({
-				minValue: this.minTemp,
-				maxValue: this.maxTemp,
-				minStep: 1
-			});
 
 		return [informationService, this.service];
 	}
