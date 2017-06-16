@@ -2,12 +2,12 @@ var Service, Characteristic;
 var request = require("request");
 
 
-const COOKER_ENDPOINT = (id, secretKey) => (
-  `https://api.anovaculinary.com/cookers/${encodeURIComponent(id)}?secret=${secretKey}&requestKey=${new Date().valueOf()}`
+const COOKER_ENDPOINT = (id, secretKey, requestKey) => (
+  `https://api.anovaculinary.com/cookers/${encodeURIComponent(id)}?secret=${secretKey}&requestKey=${requestKey}`
 );
 
-const JOBS_ENDPOINT = (id, secretKey) => (
-  `https://api.anovaculinary.com/cookers/${encodeURIComponent(id)}/jobs?secret=${secretKey}&requestKey=${new Date().valueOf()}`
+const JOBS_ENDPOINT = (id, secretKey, requestKey) => (
+  `https://api.anovaculinary.com/cookers/${encodeURIComponent(id)}/jobs?secret=${secretKey}&requestKey=${requestKey}`
 );
 
 module.exports = function(homebridge){
@@ -59,57 +59,39 @@ AnovaCooker.prototype = {
 	},
 	getServices: function() {
 
-		function getCurrentHeatingCoolingState(json) {
+		function syncLocalData(json, obj){
 
-			return json.is_running ? Characteristic.TargetHeatingCoolingState.HEAT : Characteristic.CurrentHeatingCoolingState.COOL;
+			var unit = json.status.temp_unit == 'c' ? Characteristic.TemperatureDisplayUnits.CELSIUS : Characteristic.TemperatureDisplayUnits.FAHRENHEIT;
 
-		}
+			obj.temperatureDisplayUnits = unit;
+			obj.maxTemp = obj.temperatureDisplayUnits == Characteristic.TemperatureDisplayUnits.CELSIUS ? 99 : 210;
+			obj.minTemp = obj.temperatureDisplayUnits == Characteristic.TemperatureDisplayUnits.CELSIUS ? 25 : 77;
 
-		function getTargetHeatingCoolingState(json) {
-
-			return json.is_running ? Characteristic.TargetHeatingCoolingState.HEAT : Characteristic.CurrentHeatingCoolingState.COOL;
-		}
+			obj.currentTemperature = json.status.current_temp ? json.status.current_temp :  obj.minTemp;
+			obj.targetTemperature = json.status.target_temp ? json.status.target_temp :  obj.minTemp;
 
 
-		function getCurrentTemperature(json) {
+			if(json.status.is_running){
+
+				if(obj.currentTemperature < obj.targetTemperature ){
+					obj.heatingCoolingState = Characteristic.CurrentHeatingCoolingState.HEAT;
+					obj.targetHeatingCoolingState = Characteristic.TargetHeatingCoolingState.HEAT;
+				}
+				else{
+					obj.heatingCoolingState = Characteristic.CurrentHeatingCoolingState.COOL;
+					obj.targetHeatingCoolingState = Characteristic.TargetHeatingCoolingState.AUTO;
+				}
+
+			}
+			else{
+				obj.heatingCoolingState = Characteristic.CurrentHeatingCoolingState.COOL;
+				obj.targetHeatingCoolingState = Characteristic.TargetHeatingCoolingState.COOL;
+			}
+
 			
-			return json.current_temp ? json.current_temp :  this.minTemp;
+
 		}
 
-		function getTargetTemperature(json) {
-			return json.target_temp ? json.target_temp :  this.minTemp;
-		}
-
-		
-		function getTemperatureDisplayUnits(json) {
-
-			var unit = json.temp_unit == 'c' ? Characteristic.TemperatureDisplayUnits.CELSIUS : Characteristic.TemperatureDisplayUnits.FAHRENHEIT;
-
-			this.temperatureDisplayUnits = unit;
-			this.maxTemp = this.temperatureDisplayUnits == Characteristic.TemperatureDisplayUnits.CELSIUS ? 99 : 210;
-			this.minTemp = this.temperatureDisplayUnits == Characteristic.TemperatureDisplayUnits.CELSIUS ? 25 : 77;
-
-			var characteristicCurrentTemperature = this.service.getCharacteristic(Characteristic.CurrentTemperature);
-
-			if(characteristicCurrentTemperature){
-				characteristicCurrentTemperature.setProps({
-				    maxValue: this.maxTemp,
-				    minValue: this.minTemp
-				});
-			}
-
-			var characteristicTargetTemperature = this.service.getCharacteristic(Characteristic.TargetTemperature);
-
-			if(characteristicTargetTemperature){
-				characteristicTargetTemperature.setProps({
-				    maxValue: this.maxTemp,
-				    minValue: this.minTemp
-				});
-			}
-
-
-			return unit;
-		}
 
 		function setTargetHeatingCoolingState(value) {
 
@@ -129,25 +111,31 @@ AnovaCooker.prototype = {
 		}
 		
 		var getDispatch = function (callback, characteristic){
+
 			var value = 0;
 			var actionName = "get" + characteristic.displayName.replace(/\s/g, '');
-			
-			request.get({ url: COOKER_ENDPOINT(this.cooker, this.secret)}, function (err, response, body) {
+			var requestKey = new Date().valueOf();
 
+
+			request.get({ url: COOKER_ENDPOINT(this.cooker, this.secret, requestKey)}, function (err, response, body) {
 				
 				if (!err && response.statusCode == 200) {
-					this.log("getDispatch:returnedvalue: ", JSON.parse(body).value);
-					
+
+								
 					var json = JSON.parse(body);
 
+					syncLocalData(json, this);
+
+
 					switch (actionName) {
-						case "getCurrentHeatingCoolingState": value = getCurrentHeatingCoolingState(json); break;
-						case "getTargetHeatingCoolingState": value = getTargetHeatingCoolingState(json); break;
-						case "getCurrentTemperature": value = getCurrentTemperature(json); break;
-						case "getTargetTemperature": value = getTargetTemperature(json); break;
-						case "getTemperatureDisplayUnits": value = getTemperatureDisplayUnits(json); break;
+						case "getCurrentHeatingCoolingState": value = this.heatingCoolingState; break;
+						case "getTargetHeatingCoolingState": value = this.targetHeatingCoolingState; break;
+						case "getCurrentTemperature": value = this.currentTemperature; break;
+						case "getTargetTemperature": value = this.targetTemperature; break;
+						case "getTemperatureDisplayUnits": value = this.temperatureDisplayUnits; break;
 						default: value = 0;
-					}
+					}						
+
 				}
 				else
 				{
@@ -161,11 +149,12 @@ AnovaCooker.prototype = {
 					}
 				}
 
-				this.log("getDispatch: " + actionName + ":", value);
-
+				this.log("getDispatch: ", actionName + ":", value);
 				callback(null, value);
 
 			}.bind(this));
+
+			
 
 		}.bind(this);
 
@@ -184,10 +173,18 @@ AnovaCooker.prototype = {
 			}
 			
 			request.post({ 
-				url: COOKER_ENDPOINT(this.cooker, this.secret), 
+				url: COOKER_ENDPOINT(this.cooker, this.secret, new Date().valueOf()), 
 				headers: { 'Content-Type': 'application/json' },
 	        	body: JSON.stringify(body)
 	        }, function (err, response, body) {
+
+	        	if (!err && response.statusCode == 200) {
+						
+						var json = JSON.parse(body);
+
+						syncLocalData(json, this);
+				}
+
 				
 				callback(null, value);
 
@@ -216,7 +213,7 @@ AnovaCooker.prototype = {
 
 		var counters = [];
 
-		//this.service.addCharacteristic(Characteristic.LockManagementAutoSecurityTimeout);
+		this.service.addCharacteristic(Characteristic.LockManagementAutoSecurityTimeout);
 
 		// Bind Characteristics
 		for (var characteristicIndex in this.service.characteristics) 
@@ -231,11 +228,18 @@ AnovaCooker.prototype = {
 			this.log("makeHelper: ", compactName);
 
 			counters[characteristicIndex] = makeHelper(characteristic);
-			characteristic.on('get', counters[characteristicIndex].getter.bind(this))
+			characteristic.on('get', counters[characteristicIndex].getter.bind(this));
 			characteristic.on('set', counters[characteristicIndex].setter.bind(this));
+
+			if(compactName.indexOf("Temperature")){
+				characteristic.props.maxValue = 99;
+			}
+
+
 		}
 
 
 		return [informationService, this.service];
 	}
 };
+
