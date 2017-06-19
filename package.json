@@ -1,6 +1,6 @@
 {
   "name": "homebridge-anova",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "anova cooker plugin for homebridge: https://github.com/nfarina/homebridge",
   "license": "ISC",
   "keywords": [
@@ -13,12 +13,12 @@
   "author": "tasict",
   "repository": {
     "type": "git",
-    "url": "git+git@github.com:tasict/homebridge-http-anova.git"
+    "url": "git+git@github.com:tasict/homebridge-anova.git"
   },
   "dependencies": {
     "request": "^2.65.0"
   },
-  "homepage": "https://github.com/tasict/homebridge-anova#readme",
+  "homepage": "https://github.com/tasict/homebridge-anova",
   "main": "index.js",
   "devDependencies": {},
   "scripts": {
